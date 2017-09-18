@@ -68,7 +68,7 @@ Resources:
                 ActionMode: CREATE_UPDATE
                 Capabilities: CAPABILITY_IAM
                 OutputFileName: StackOutputs.json
-                ParameterOverrides: !Sub '{ "ProjectName": "${ProjectName}" }'
+                ParameterOverrides: !Sub '{ "ProjectName": "${ProjectName}", "CloudFormationServiceRoleArn": "${CloudFormationServiceRoleArn}" }'
                 RoleArn: !Ref CloudFormationServiceRoleArn
                 StackName: !Sub "${AWS::StackName}"
                 TemplatePath: stack.yml
