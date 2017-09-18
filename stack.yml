@@ -177,18 +177,6 @@ Resources:
                   - "ec2:TerminateInstances"
                 Resource: "*"
 
-  PackerBuildServiceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: codepipeline.amazonaws.com
-            Action: "sts:AssumeRole"
-      Policies:
- 
   PipelineServiceRole:
     Type: AWS::IAM::Role
     Properties:
