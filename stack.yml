@@ -1,0 +1,225 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Sets up a new code repo, build project, and build pipeline on AWS
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Name of your new project
+    Default: aws-on-tap-ami
+  CloudFormationServiceRoleArn:
+    Type: String
+    Description: IAM Role assumed by CloudFormation to administer the AMI Pipeline
+
+Outputs:
+  GitUrl:
+    Value: !GetAtt CodeRepo.CloneUrlSsh
+  BucketName:
+    Value: !Ref ArtifactsBucket
+  CodeBuildProject:
+    Value: !Ref BuildProject
+  CodePipeline:
+    Value: !Ref Pipeline
+
+Resources:
+  CodeRepo:
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryName: !Ref ProjectName
+
+  ArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: Private
+      BucketName: !Sub "${ProjectName}-${AWS::Region}"
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub "${ProjectName}-pipeline"
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactsBucket
+      RestartExecutionOnUpdate: true
+      RoleArn: !GetAtt PipelineServiceRole.Arn
+      Stages:
+        - Name: Commit
+          Actions:
+            - Name: Checkout
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeCommit
+                Version: 1
+              Configuration:
+                RepositoryName: !GetAtt CodeRepo.Name
+                BranchName: master
+                PollForSourceChanges: true
+              OutputArtifacts:
+                - Name: SourceCode
+        - Name: Prepare
+          Actions:
+            - Name: UpdatePipeline
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CloudFormation
+              Configuration:
+                ActionMode: CREATE_UPDATE
+                Capabilities: CAPABILITY_IAM
+                OutputFileName: StackOutputs.json
+                ParameterOverrides: !Sub '{ "ProjectName": "${ProjectName}" }'
+                RoleArn: !Ref CloudFormationServiceRoleArn
+                StackName: !Sub "${AWS::StackName}"
+                TemplatePath: stack.yml
+              InputArtifacts:
+                - Name: SourceCode
+        - Name: Build
+          Actions:
+            - Name: Packer
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              Configuration:
+                ProjectName: !Ref BuildProject
+              InputArtifacts:
+                - Name: SourceCode
+              OutputArtifacts:
+                - Name: Packer
+
+  BuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${ProjectName}-build-packer"
+      Source:
+        Type: CODEPIPELINE
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        Image: aws/codebuild/ubuntu-base:14.04
+        ComputeType: BUILD_GENERAL1_SMALL
+      ServiceRole: !Ref BuildProjectServiceRole
+
+  BuildProjectServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: !Sub "${ProjectName}-build-service-role"
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Sid: CloudWatchLogsPolicy
+                Effect: Allow
+                Action: 
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource:
+                  - "*"
+              - Sid: CodeCommitPolicy
+                Effect: Allow
+                Action:
+                  - "codecommit:GitPull"
+                Resource:
+                  - "*"
+              - Sid: S3ObjectPolicy
+                Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                  - "s3:GetObjectVersion"
+                  - "s3:PutObject"
+                Resource:
+                  - !Sub "${ArtifactsBucket.Arn}/*"
+
+  PipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: !Sub "${ProjectName}-pipeline-service-role"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action:
+                  - "s3:GetObject"
+                  - "s3:GetObjectVersion"
+                  - "s3:GetBucketVersioning"
+                Resource: "*"
+                Effect: "Allow"
+              - Action:
+                  - "s3:PutObject"
+                Resource:
+                  - "arn:aws:s3:::codepipeline*"
+                  - "arn:aws:s3:::elasticbeanstalk*"
+                Effect: "Allow"
+              - Action:
+                  - "codecommit:CancelUploadArchive"
+                  - "codecommit:GetBranch"
+                  - "codecommit:GetCommit"
+                  - "codecommit:GetUploadArchiveStatus"
+                  - "codecommit:UploadArchive"
+                Resource: "*"
+                Effect: "Allow"
+              - Action:
+                  - "codedeploy:CreateDeployment"
+                  - "codedeploy:GetApplicationRevision"
+                  - "codedeploy:GetDeployment"
+                  - "codedeploy:GetDeploymentConfig"
+                  - "codedeploy:RegisterApplicationRevision"
+                Resource: "*"
+                Effect: "Allow"
+              - Action:
+                  - "elasticbeanstalk:*"
+                  - "ec2:*"
+                  - "elasticloadbalancing:*"
+                  - "autoscaling:*"
+                  - "cloudwatch:*"
+                  - "s3:*"
+                  - "sns:*"
+                  - "cloudformation:*"
+                  - "rds:*"
+                  - "sqs:*"
+                  - "ecs:*"
+                  - "iam:PassRole"
+                Resource: "*"
+                Effect: "Allow"
+              - Action:
+                  - "lambda:InvokeFunction"
+                  - "lambda:ListFunctions"
+                Resource: "*"
+                Effect: "Allow"
+              - Action:
+                  - "cloudformation:CreateStack"
+                  - "cloudformation:DeleteStack"
+                  - "cloudformation:DescribeStacks"
+                  - "cloudformation:UpdateStack"
+                  - "cloudformation:CreateChangeSet"
+                  - "cloudformation:DeleteChangeSet"
+                  - "cloudformation:DescribeChangeSet"
+                  - "cloudformation:ExecuteChangeSet"
+                  - "cloudformation:SetStackPolicy"
+                  - "cloudformation:ValidateTemplate"
+                  - "iam:PassRole"
+                Resource: "*"
+                Effect: "Allow"
+              - Action:
+                  - "codebuild:BatchGetBuilds"
+                  - "codebuild:StartBuild"
+                Resource: "*"
+                Effect: "Allow"
