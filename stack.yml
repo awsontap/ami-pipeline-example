@@ -71,7 +71,7 @@ Resources:
                 ParameterOverrides: !Sub '{ "ProjectName": "${ProjectName}", "CloudFormationServiceRoleArn": "${CloudFormationServiceRoleArn}" }'
                 RoleArn: !Ref CloudFormationServiceRoleArn
                 StackName: !Sub "${AWS::StackName}"
-                TemplatePath: stack.yml
+                TemplatePath: TemplateSource::stack.yml
               InputArtifacts:
                 - Name: SourceCode
         - Name: Build
