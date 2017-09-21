@@ -44,11 +44,34 @@ Resources:
       TopicName: !Sub "${ProjectName}-approvals"
       DisplayName: !Sub "Approval notifications for ${ProjectName} pipeline"
 
-#   ErrorsTopic:
-#     Type: AWS::SNS::Topic
-#     Properties:
-#       TopicName: !Sub "${ProjectName}-errors"
-#       DisplayName: !Sub "Error notifications for ${ProjectName} pipeline"
+  ErrorsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${ProjectName}-errors"
+      DisplayName: !Sub "Error notifications for ${ProjectName} pipeline"
+
+  PipelineErrorsEventRule:
+    Type: "AWS::Events::Rule"
+    Properties: 
+      Name: !Sub "${ProjectName}-errors"
+      Description: "Matches events for ${ProjectName} pipeline failures"
+      EventPattern: {
+          "source": [
+            "aws.codepipeline"
+          ],
+          "detail-type": [
+            "CodePipeline Action Execution State Change"
+          ],
+          "detail": {
+            "state": [
+              "FAILED"
+            ]
+          }
+        }
+      State: ENABLED
+      Targets:
+        - Id: !Sub "${ProjectName}-errors-sns"
+          Arn: !Ref "ErrorsTopic"
 
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
@@ -103,7 +126,7 @@ Resources:
                 ParameterOverrides: !Sub '{
                     "ProjectName": "${ProjectName}",
                     "PublicSubnet": "${PublicSubnet}",
-                    "PublicSubnet": "${SecurityGroup}",
+                    "SecurityGroup": "${SecurityGroup}",
                   }'
                 RoleArn: !Ref CloudFormationServiceRoleArn
                 StackName: !Sub "${AWS::StackName}"
@@ -210,6 +233,35 @@ Resources:
                   - "ec2:StopInstances"
                   - "ec2:TerminateInstances"
                 Resource: "*"
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: !Sub "${ProjectName}-lambda-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - {
+                  "Action": ["logs:*"],
+                  "Effect": "Allow", 
+                  "Resource": "arn:aws:logs:*:*:*"
+                }
+              - {
+                  "Action": [
+                    "codepipeline:PutJobSuccessResult",
+                    "codepipeline:PutJobFailureResult"
+                    ],
+                    "Effect": "Allow",
+                    "Resource": "*"
+                 }
 
   LambdaExecutionRole:
     Type: AWS::IAM::Role
