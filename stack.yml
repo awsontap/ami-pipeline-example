@@ -9,6 +9,12 @@ Parameters:
   CloudFormationServiceRoleArn:
     Type: String
     Description: IAM Role assumed by CloudFormation to administer the AMI Pipeline
+  PublicSubnet:
+    Type: String
+    Description: Subnet ID of a public subnet in which to launch instance
+  SecurityGroup:
+    Type: String
+    Description: Security Group ID of a security group that allows inbound public HTTP
 
 Outputs:
   GitUrl:
@@ -31,6 +37,18 @@ Resources:
     Properties:
       AccessControl: Private
       BucketName: !Sub "${ProjectName}-${AWS::Region}"
+
+  ApprovalTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${ProjectName}-approvals"
+      DisplayName: !Sub "Approval notifications for ${ProjectName} pipeline"
+
+#   ErrorsTopic:
+#     Type: AWS::SNS::Topic
+#     Properties:
+#       TopicName: !Sub "${ProjectName}-errors"
+#       DisplayName: !Sub "Error notifications for ${ProjectName} pipeline"
 
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
@@ -56,24 +74,6 @@ Resources:
                 PollForSourceChanges: true
               OutputArtifacts:
                 - Name: SourceCode
-        - Name: Prepare
-          Actions:
-            - Name: UpdatePipeline
-              ActionTypeId:
-                Category: Deploy
-                Owner: AWS
-                Version: 1
-                Provider: CloudFormation
-              Configuration:
-                ActionMode: CREATE_UPDATE
-                Capabilities: CAPABILITY_IAM
-                OutputFileName: StackOutputs.json
-                ParameterOverrides: !Sub '{ "ProjectName": "${ProjectName}", "CloudFormationServiceRoleArn": "${CloudFormationServiceRoleArn}" }'
-                RoleArn: !Ref CloudFormationServiceRoleArn
-                StackName: !Sub "${AWS::StackName}"
-                TemplatePath: SourceCode::stack.yml
-              InputArtifacts:
-                - Name: SourceCode
         - Name: Build
           Actions:
             - Name: Packer
@@ -88,6 +88,40 @@ Resources:
                 - Name: SourceCode
               OutputArtifacts:
                 - Name: Packer
+        - Name: Test
+          Actions:
+            - Name: LaunchTestInstance
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CloudFormation
+              Configuration:
+                ActionMode: CREATE_UPDATE
+                Capabilities: CAPABILITY_IAM
+                OutputFileName: StackOutputs.json
+                ParameterOverrides: !Sub '{
+                    "ProjectName": "${ProjectName}",
+                    "PublicSubnet": "${PublicSubnet}",
+                    "PublicSubnet": "${SecurityGroup}",
+                  }'
+                RoleArn: !Ref CloudFormationServiceRoleArn
+                StackName: !Sub "${AWS::StackName}"
+                TemplatePath: SourceCode::test-stack.yml
+              InputArtifacts:
+                - Name: SourceCode
+              OutputArtifacts:
+                - Name: TestStackOutputs
+        - Name: Publish
+          Actions:
+            - Name: Approval
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Provider: Manual
+                Version: 1
+              Configuration:
+                NotificationArn: !Sub "${ApprovalTopic}"
 
   BuildProject:
     Type: AWS::CodeBuild::Project
@@ -176,6 +210,35 @@ Resources:
                   - "ec2:StopInstances"
                   - "ec2:TerminateInstances"
                 Resource: "*"
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: !Sub "${ProjectName}-lambda-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - {
+                  "Action": ["logs:*"],
+                  "Effect": "Allow", 
+                  "Resource": "arn:aws:logs:*:*:*"
+                }
+              - {
+                  "Action": [
+                    "codepipeline:PutJobSuccessResult",
+                    "codepipeline:PutJobFailureResult"
+                    ],
+                    "Effect": "Allow",
+                    "Resource": "*"
+                 }
 
   PipelineServiceRole:
     Type: AWS::IAM::Role

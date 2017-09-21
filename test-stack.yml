@@ -1,0 +1,37 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Launches a test EC2 instance for a new AMI
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Name of your new project
+    Default: aws-on-tap-ami
+  PublicSubnet:
+    Type: String
+    Description: Subnet ID of a public subnet in which to launch instance
+  SecurityGroup:
+    Type: String
+    Description: Security Group ID of a security group that allows inbound public HTTP
+
+Outputs:
+  URL:
+    Value: !Sub "http://${EC2Instance.PublicDnsName}"
+
+Resources:
+   EC2Instance: 
+      Type: "AWS::EC2::Instance"
+      Properties: 
+        ImageId:  !Ref "AMI_ID"
+        InstanceType: t2.micro
+        Tags:
+          - Key: Name
+            Value: !Sub "test-${ProjectName}"
+          - Key: Environment
+            Value: !Sub "test"
+        NetworkInterfaces: 
+          - AssociatePublicIpAddress: "true"
+            DeviceIndex: "0"
+            GroupSet: 
+              - Ref: !Ref "SecurityGroup"
+            SubnetId: 
+              Ref: !Ref "PublicSubnet"
