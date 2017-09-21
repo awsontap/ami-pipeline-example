@@ -2,10 +2,12 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: Launches a test EC2 instance for a new AMI
 
 Parameters:
-  ProjectName:
+  AmiId:
     Type: String
-    Description: Name of your new project
-    Default: aws-on-tap-ami
+    Description: AMI ID to launch test instance with
+  NameTag:
+    Type: String
+    Description: Name tag value for the test instance
   PublicSubnet:
     Type: String
     Description: Subnet ID of a public subnet in which to launch instance
@@ -25,9 +27,9 @@ Resources:
         InstanceType: t2.micro
         Tags:
           - Key: Name
-            Value: !Sub "test-${ProjectName}"
+            Value: !Ref "${NameTag}"
           - Key: Environment
-            Value: !Sub "test"
+            Value: "test"
         NetworkInterfaces: 
           - AssociatePublicIpAddress: "true"
             DeviceIndex: "0"
